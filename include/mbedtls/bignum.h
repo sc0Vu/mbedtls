@@ -865,7 +865,7 @@ int mbedtls_mpi_inv_mod( mbedtls_mpi *X, const mbedtls_mpi *A,
  * \return         \c 0 if successful.
  * \return         Another negative error code on different kinds of failure.
  */
-int mbedtls_mpi_is_odd( const mbedtls_mpi *A, mbedtls_mpi_uint *b );
+int mbedtls_mpi_is_odd( const mbedtls_mpi *A, uint8_t *b );
 
 #if !defined(MBEDTLS_DEPRECATED_REMOVED)
 #if defined(MBEDTLS_DEPRECATED_WARNING)
