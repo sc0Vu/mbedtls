@@ -853,6 +853,20 @@ int mbedtls_mpi_gcd( mbedtls_mpi *G, const mbedtls_mpi *A,
 int mbedtls_mpi_inv_mod( mbedtls_mpi *X, const mbedtls_mpi *A,
                          const mbedtls_mpi *N );
 
+
+/**
+ * \brief          Check the given number is odd.
+ *
+ * \param A        The MPI to compute the residue of.
+ *                 This must point to an initialized MPi.
+ * \param is_odd   \c 0 if the number is even.
+ *                    1 if the number is odd.
+ *
+ * \return         \c 0 if successful.
+ * \return         Another negative error code on different kinds of failure.
+ */
+int mbedtls_mpi_is_odd( const mbedtls_mpi *A, mbedtls_mpi_uint *b );
+
 #if !defined(MBEDTLS_DEPRECATED_REMOVED)
 #if defined(MBEDTLS_DEPRECATED_WARNING)
 #define MBEDTLS_DEPRECATED      __attribute__((deprecated))

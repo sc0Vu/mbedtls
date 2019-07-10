@@ -2246,6 +2246,30 @@ cleanup:
     return( ret );
 }
 
+/*
+ * Check the given number is odd.
+ * Maybe use bit in the future.
+ */
+int mbedtls_mpi_is_odd( const mbedtls_mpi *A, mbedtls_mpi_uint *b )
+{
+    int ret;
+    // mbedtls_mpi_uint B;
+    MPI_VALIDATE_RET( A != NULL );
+
+    if ( ( ret = mbedtls_mpi_mod_int( b, A, 2 ) ) < 0 )
+        goto cleanup;
+
+    if ( b != 1 ) {
+        b = 0;
+    }
+
+    goto cleanup;
+
+cleanup:
+
+    return( ret );
+}
+
 #if defined(MBEDTLS_GENPRIME)
 
 static const int small_prime[] =
