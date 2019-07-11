@@ -859,13 +859,13 @@ int mbedtls_mpi_inv_mod( mbedtls_mpi *X, const mbedtls_mpi *A,
  *
  * \param A        The MPI to compute the residue of.
  *                 This must point to an initialized MPi.
- * \param is_odd   \c 0 if the number is even.
- *                    1 if the number is odd.
  *
- * \return         \c 0 if successful.
+ * \return         \c -1 if the function went wrong.
+ * \return         \c 0 if the number is even.
+ * \return         \c 1 if the number is odd.
  * \return         Another negative error code on different kinds of failure.
  */
-int mbedtls_mpi_is_odd( const mbedtls_mpi *A, uint8_t *b );
+int mbedtls_mpi_is_odd( const mbedtls_mpi *A );
 
 #if !defined(MBEDTLS_DEPRECATED_REMOVED)
 #if defined(MBEDTLS_DEPRECATED_WARNING)

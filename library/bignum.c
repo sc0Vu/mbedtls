@@ -2250,26 +2250,15 @@ cleanup:
  * Check the given number is odd.
  * Maybe use bit in the future.
  */
-int mbedtls_mpi_is_odd( const mbedtls_mpi *A, uint8_t *b )
+int mbedtls_mpi_is_odd( const mbedtls_mpi *A )
 {
-    int ret;
-    uint8_t one = 1;
-    uint8_t zero = 0;
-    // mbedtls_mpi_uint B;
+    mbedtls_mpi_uint b;
     MPI_VALIDATE_RET( A != NULL );
 
-    if ( ( ret = mbedtls_mpi_mod_int( b, A, 2 ) ) < 0 )
-        goto cleanup;
+    if ( mbedtls_mpi_mod_int( &b, A, 2 ) < 0 )
+        return( -1 );
 
-    if ( memcmp(b, &one, 1) != 0 ) {
-        memcpy(b, &zero, 1);
-    }
-
-    goto cleanup;
-
-cleanup:
-
-    return( ret );
+    return( b );
 }
 
 #if defined(MBEDTLS_GENPRIME)
