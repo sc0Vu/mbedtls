@@ -740,6 +740,13 @@
 #define MBEDTLS_ECP_NIST_OPTIM
 
 /**
+ * \def MBEDTLS_ECP_RECOVERABLE
+ *
+ * Note: it's an experimental usage to recovery public from elliptic signed signature.
+ */
+#define MBEDTLS_ECP_RECOVERABLE
+
+/**
  * \def MBEDTLS_ECP_RESTARTABLE
  *
  * Enable "non-blocking" ECC operations that can return early and be resumed.

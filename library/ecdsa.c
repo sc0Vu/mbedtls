@@ -813,6 +813,237 @@ int mbedtls_ecdsa_genkey( mbedtls_ecdsa_context *ctx, mbedtls_ecp_group_id gid,
 }
 #endif /* !MBEDTLS_ECDSA_GENKEY_ALT */
 
+#if defined(MBEDTLS_ECP_RECOVERABLE)
+/*
+ * Compute ECDSA signature of a hashed message (SEC1 4.1.3)
+ * Obviously, compared to SEC1 4.1.3, we skip step 4 (hash message)
+ */
+int ecdsa_sign_recoverable( mbedtls_ecp_group *grp,
+                mbedtls_mpi *r, mbedtls_mpi *s, const mbedtls_mpi *d,
+                int* recid, const unsigned char *buf, size_t blen,
+                int (*f_rng)(void *, unsigned char *, size_t), void *p_rng,
+                mbedtls_ecdsa_restart_ctx *rs_ctx )
+{
+    int ret, key_tries, sign_tries;
+    int *p_sign_tries = &sign_tries, *p_key_tries = &key_tries;
+    mbedtls_ecp_point R;
+    mbedtls_mpi k, e, t;
+    mbedtls_mpi *pk = &k, *pr = r;
+
+    /* Fail cleanly on curves such as Curve25519 that can't be used for ECDSA */
+    if( grp->N.p == NULL )
+        return( MBEDTLS_ERR_ECP_BAD_INPUT_DATA );
+
+    /* Make sure d is in range 1..n-1 */
+    if( mbedtls_mpi_cmp_int( d, 1 ) < 0 || mbedtls_mpi_cmp_mpi( d, &grp->N ) >= 0 )
+        return( MBEDTLS_ERR_ECP_INVALID_KEY );
+
+    mbedtls_ecp_point_init( &R );
+    mbedtls_mpi_init( &k ); mbedtls_mpi_init( &e ); mbedtls_mpi_init( &t );
+
+    ECDSA_RS_ENTER( sig );
+
+#if defined(MBEDTLS_ECP_RESTARTABLE)
+    if( rs_ctx != NULL && rs_ctx->sig != NULL )
+    {
+        /* redirect to our context */
+        p_sign_tries = &rs_ctx->sig->sign_tries;
+        p_key_tries = &rs_ctx->sig->key_tries;
+        pk = &rs_ctx->sig->k;
+        pr = &rs_ctx->sig->r;
+
+        /* jump to current step */
+        if( rs_ctx->sig->state == ecdsa_sig_mul )
+            goto mul;
+        if( rs_ctx->sig->state == ecdsa_sig_modn )
+            goto modn;
+    }
+#endif /* MBEDTLS_ECP_RESTARTABLE */
+
+    *p_sign_tries = 0;
+    do
+    {
+        if( *p_sign_tries++ > 10 )
+        {
+            ret = MBEDTLS_ERR_ECP_RANDOM_FAILED;
+            goto cleanup;
+        }
+
+        /*
+         * Steps 1-3: generate a suitable ephemeral keypair
+         * and set r = xR mod n
+         */
+        *p_key_tries = 0;
+        do
+        {
+            if( *p_key_tries++ > 10 )
+            {
+                ret = MBEDTLS_ERR_ECP_RANDOM_FAILED;
+                goto cleanup;
+            }
+
+            MBEDTLS_MPI_CHK( mbedtls_ecp_gen_privkey( grp, pk, f_rng, p_rng ) );
+
+#if defined(MBEDTLS_ECP_RESTARTABLE)
+            if( rs_ctx != NULL && rs_ctx->sig != NULL )
+                rs_ctx->sig->state = ecdsa_sig_mul;
+
+mul:
+#endif
+            MBEDTLS_MPI_CHK( mbedtls_ecp_mul_restartable( grp, &R, pk, &grp->G,
+                                                  f_rng, p_rng, ECDSA_RS_ECP ) );
+            MBEDTLS_MPI_CHK( mbedtls_mpi_mod_mpi( pr, &R.X, &grp->N ) );
+        }
+        while( mbedtls_mpi_cmp_int( pr, 0 ) == 0 );
+
+#if defined(MBEDTLS_ECP_RESTARTABLE)
+        if( rs_ctx != NULL && rs_ctx->sig != NULL )
+            rs_ctx->sig->state = ecdsa_sig_modn;
+
+modn:
+#endif
+        /*
+         * Accounting for everything up to the end of the loop
+         * (step 6, but checking now avoids saving e and t)
+         */
+        ECDSA_BUDGET( MBEDTLS_ECP_OPS_INV + 4 );
+
+        /*
+         * Step 5: derive MPI from hashed message
+         */
+        MBEDTLS_MPI_CHK( derive_mpi( grp, &e, buf, blen ) );
+
+        /*
+         * Generate a random value to blind inv_mod in next step,
+         * avoiding a potential timing leak.
+         */
+        MBEDTLS_MPI_CHK( mbedtls_ecp_gen_privkey( grp, &t, f_rng, p_rng ) );
+
+        /*
+         * Step 6: compute s = (e + r * d) / k = t (e + rd) / (kt) mod n
+         */
+        MBEDTLS_MPI_CHK( mbedtls_mpi_mul_mpi( s, pr, d ) );
+        MBEDTLS_MPI_CHK( mbedtls_mpi_add_mpi( &e, &e, s ) );
+        MBEDTLS_MPI_CHK( mbedtls_mpi_mul_mpi( &e, &e, &t ) );
+        MBEDTLS_MPI_CHK( mbedtls_mpi_mul_mpi( pk, pk, &t ) );
+        MBEDTLS_MPI_CHK( mbedtls_mpi_inv_mod( s, pk, &grp->N ) );
+        MBEDTLS_MPI_CHK( mbedtls_mpi_mul_mpi( s, s, &e ) );
+        MBEDTLS_MPI_CHK( mbedtls_mpi_mod_mpi( s, s, &grp->N ) );
+    }
+    while( mbedtls_mpi_cmp_int( s, 0 ) == 0 );
+
+    // caculate recovery id
+    int rec = ( ( mbedtls_mpi_is_odd(&R.Y) <= 0 ) ? 0: 1 ) | ( ( mbedtls_mpi_cmp_mpi(pr, &R.X) != 0) ? 2 : 1 );
+    memcpy(recid, &rec, sizeof(rec));
+
+#if defined(MBEDTLS_ECP_RESTARTABLE)
+    if( rs_ctx != NULL && rs_ctx->sig != NULL )
+        mbedtls_mpi_copy( r, pr );
+#endif
+
+cleanup:
+    mbedtls_ecp_point_free( &R );
+    mbedtls_mpi_free( &k ); mbedtls_mpi_free( &e ); mbedtls_mpi_free( &t );
+
+    ECDSA_RS_LEAVE( sig );
+
+    return( ret );
+}
+
+/*
+ * Compute ECDSA signature of a hashed message
+ */
+int mbedtls_ecdsa_sign_recoverable( mbedtls_ecp_group *grp, mbedtls_mpi *r, mbedtls_mpi *s,
+                const mbedtls_mpi *d, int *recid, const unsigned char *buf, size_t blen,
+                int (*f_rng)(void *, unsigned char *, size_t), void *p_rng )
+{
+    ECDSA_VALIDATE_RET( grp   != NULL );
+    ECDSA_VALIDATE_RET( r     != NULL );
+    ECDSA_VALIDATE_RET( s     != NULL );
+    ECDSA_VALIDATE_RET( d     != NULL );
+    ECDSA_VALIDATE_RET( recid != NULL );
+    ECDSA_VALIDATE_RET( f_rng != NULL );
+    ECDSA_VALIDATE_RET( buf   != NULL || blen == 0 );
+
+    return( ecdsa_sign_recoverable( grp, r, s, d, recid, buf, blen,
+                                    f_rng, p_rng, NULL ) );
+}
+
+/*
+ * Deterministic signature wrapper
+ */
+int mbedtls_ecdsa_sign_det_recoverable( mbedtls_ecp_group *grp, mbedtls_mpi *r, mbedtls_mpi *s,
+                    const mbedtls_mpi *d, int *recid, const unsigned char *buf, size_t blen,
+                    mbedtls_md_type_t md_alg )
+{
+    ECDSA_VALIDATE_RET( grp   != NULL );
+    ECDSA_VALIDATE_RET( r     != NULL );
+    ECDSA_VALIDATE_RET( s     != NULL );
+    ECDSA_VALIDATE_RET( d     != NULL );
+    ECDSA_VALIDATE_RET( recid != NULL );
+    ECDSA_VALIDATE_RET( buf   != NULL || blen == 0 );
+
+    mbedtls_printf("You are in\n");
+
+    int ret;
+    mbedtls_hmac_drbg_context rng_ctx;
+    mbedtls_hmac_drbg_context *p_rng = &rng_ctx;
+    unsigned char data[2 * MBEDTLS_ECP_MAX_BYTES];
+    size_t grp_len = ( grp->nbits + 7 ) / 8;
+    const mbedtls_md_info_t *md_info;
+    mbedtls_mpi h;
+    mbedtls_ecdsa_restart_ctx *rs_ctx;
+
+    if( ( md_info = mbedtls_md_info_from_type( md_alg ) ) == NULL )
+        return( MBEDTLS_ERR_ECP_BAD_INPUT_DATA );
+
+    mbedtls_mpi_init( &h );
+    mbedtls_hmac_drbg_init( &rng_ctx );
+
+    ECDSA_RS_ENTER( det );
+
+#if defined(MBEDTLS_ECP_RESTARTABLE)
+    if( rs_ctx != NULL && rs_ctx->det != NULL )
+    {
+        /* redirect to our context */
+        p_rng = &rs_ctx->det->rng_ctx;
+
+        /* jump to current step */
+        if( rs_ctx->det->state == ecdsa_det_sign )
+            goto sign;
+    }
+#endif /* MBEDTLS_ECP_RESTARTABLE */
+
+    /* Use private key and message hash (reduced) to initialize HMAC_DRBG */
+    MBEDTLS_MPI_CHK( mbedtls_mpi_write_binary( d, data, grp_len ) );
+    MBEDTLS_MPI_CHK( derive_mpi( grp, &h, buf, blen ) );
+    MBEDTLS_MPI_CHK( mbedtls_mpi_write_binary( &h, data + grp_len, grp_len ) );
+    mbedtls_hmac_drbg_seed_buf( p_rng, md_info, data, 2 * grp_len );
+
+#if defined(MBEDTLS_ECP_RESTARTABLE)
+    if( rs_ctx != NULL && rs_ctx->det != NULL )
+        rs_ctx->det->state = ecdsa_det_sign;
+
+sign:
+#endif
+#if defined(MBEDTLS_ECDSA_SIGN_ALT)
+    ret = mbedtls_ecdsa_sign_recoverable( grp, r, s, d, recid, buf, blen,
+                              mbedtls_hmac_drbg_random, p_rng );
+#else
+    ret = ecdsa_sign_recoverable( grp, r, s, d, recid, buf, blen,
+                      mbedtls_hmac_drbg_random, p_rng, rs_ctx );
+#endif /* MBEDTLS_ECDSA_SIGN_ALT */
+
+cleanup:
+    mbedtls_hmac_drbg_free( &rng_ctx );
+    mbedtls_mpi_free( &h );
+
+    ECDSA_RS_LEAVE( det );
+
+    return( ret );
+}
+#endif /* MBEDTLS_ECP_RECOVERABLE */
+
 /*
  * Set context from an mbedtls_ecp_keypair
  */
