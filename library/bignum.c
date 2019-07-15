@@ -1690,12 +1690,9 @@ int mbedtls_mpi_mod_mpi( mbedtls_mpi *R, const mbedtls_mpi *A, const mbedtls_mpi
 
     if( mbedtls_mpi_cmp_int( B, 0 ) < 0 )
         return( MBEDTLS_ERR_MPI_NEGATIVE_VALUE );
-
     MBEDTLS_MPI_CHK( mbedtls_mpi_div_mpi( NULL, R, A, B ) );
-
     while( mbedtls_mpi_cmp_int( R, 0 ) < 0 )
       MBEDTLS_MPI_CHK( mbedtls_mpi_add_mpi( R, R, B ) );
-
     while( mbedtls_mpi_cmp_mpi( R, B ) >= 0 )
       MBEDTLS_MPI_CHK( mbedtls_mpi_sub_mpi( R, R, B ) );
 
@@ -2259,6 +2256,21 @@ int mbedtls_mpi_is_odd( const mbedtls_mpi *A )
         return( -1 );
 
     return( b );
+}
+
+/*
+ * Check the given number is zero.
+ * Maybe use bit in the future (bitwise or).
+ */
+int mbedtls_mpi_is_zero(mbedtls_mpi *a) {
+    int n;
+    n = a->n;
+    for(int i=0; i < n; i++ ) {
+        if (a->p[i] != 0) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 #if defined(MBEDTLS_GENPRIME)
