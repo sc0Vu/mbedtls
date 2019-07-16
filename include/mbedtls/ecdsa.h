@@ -41,6 +41,64 @@
 #include "ecp.h"
 #include "md.h"
 
+// TODO: add functions, change structs
+#if defined(MBEDTLS_ECP_RECOVERABLE)
+#ifdef VERIFY
+#define VERIFY_BITS(x, n) VERIFY_CHECK(((x) >> (n)) == 0)
+#else
+#define VERIFY_BITS(x, n) do { } while(0)
+#endif
+
+#if defined(SECP256K1_BUILD) && defined(VERIFY)
+# define SECP256K1_RESTRICT
+#else
+# if (!defined(__STDC_VERSION__) || (__STDC_VERSION__ < 199901L) )
+#  if SECP256K1_GNUC_PREREQ(3,0)
+#   define SECP256K1_RESTRICT __restrict__
+#  elif (defined(_MSC_VER) && _MSC_VER >= 1400)
+#   define SECP256K1_RESTRICT __restrict
+#  else
+#   define SECP256K1_RESTRICT
+#  endif
+# else
+#  define SECP256K1_RESTRICT restrict
+# endif
+#endif
+
+#if defined(COVERAGE)
+#define VERIFY_CHECK(check)
+#define VERIFY_SETUP(stmt)
+#elif defined(VERIFY)
+#define VERIFY_CHECK CHECK
+#define VERIFY_SETUP(stmt) do { stmt; } while(0)
+#else
+#define VERIFY_CHECK(cond) do { (void)(cond); } while(0)
+#define VERIFY_SETUP(stmt)
+#endif
+
+// #if defined(MBEDTLS_HAVE_INT64)
+// typedef struct {
+//     /* X = sum(i=0..9, elem[i]*2^26) mod n */
+//     mbedtls_mpi_uint n[5];
+// } mbedtls_fe;
+// #endif
+// #if defined(MBEDTLS_HAVE_INT32)
+// typedef struct {
+//     /* X = sum(i=0..9, elem[i]*2^26) mod n */
+//     mbedtls_mpi_uint n[10];
+// } mbedtls_fe;
+// #endif
+
+typedef struct {
+    /* X = sum(i=0..9, elem[i]*2^26) mod n */
+    // mbedtls_mpi_uint n[10];
+    uint32_t n[10];
+} mbedtls_fe;
+
+/** The number of entries a table with precomputed multiples needs to have. */
+#define ECMULT_TABLE_SIZE(w) (1 << ((w)-2))
+#endif
+
 /*
  * RFC-4492 page 20:
  *

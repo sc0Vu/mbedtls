@@ -875,6 +875,7 @@ int mbedtls_mpi_is_odd( const mbedtls_mpi *A );
  *
  * \return         \c 0 if the number is not zero.
  * \return         \c 1 if the number is zero.
+ * \return         Another negative error code on different kinds of failure.
  */
 int mbedtls_mpi_is_odd( const mbedtls_mpi *A );
 
