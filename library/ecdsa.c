@@ -1109,7 +1109,7 @@ void mbedtls_fe_sqr(mbedtls_fe *r, mbedtls_fe *a)
     mbedtls_fe_sqr_inner(r->n, a->n);
 }
 
-void mbedtls_fe_mul_inner(uint32_t *r, const uint32_t *a, const uint32_t * SECP256K1_RESTRICT b) {
+void mbedtls_fe_mul_inner(uint32_t *r, const uint32_t *a, const uint32_t * MBEDTLS_RESTRICT b) {
     uint64_t c, d;
     uint64_t u0, u1, u2, u3, u4, u5, u6, u7, u8;
     uint32_t t9, t1, t0, t2, t3, t4, t5, t6, t7;
@@ -1439,7 +1439,7 @@ void mbedtls_fe_mul_inner(uint32_t *r, const uint32_t *a, const uint32_t * SECP2
 }
 
 // TODO: refactor and change n size
-void mbedtls_fe_mul(mbedtls_fe *r, mbedtls_fe *a, mbedtls_fe * SECP256K1_RESTRICT b)
+void mbedtls_fe_mul(mbedtls_fe *r, mbedtls_fe *a, mbedtls_fe * MBEDTLS_RESTRICT b)
 {
     mbedtls_fe_mul_inner(r->n, a->n, b->n);
 }
@@ -1612,7 +1612,7 @@ int mbedtls_mpi_to_fe(mbedtls_mpi *r, mbedtls_fe *m)
 
     size_t n_size = sizeof( m->n );
     size_t r_size = n_size / sizeof(mbedtls_mpi_uint);
-    if (r_size < r->n || !r->p) {
+    if (r_size < r->n || r->p == NULL) {
         // grow the size
         // MBEDTLS_MPI_CHK( mbedtls_mpi_grow( m, r->n - r_size ) );
         ret = -1;
@@ -1633,13 +1633,16 @@ int mbedtls_fe_to_mpi(mbedtls_fe *r, mbedtls_mpi *m)
     ECDSA_VALIDATE_RET( r     != NULL );
     ECDSA_VALIDATE_RET( m     != NULL );
 
-    size_t n_size = sizeof( r->n );
-    size_t p_size = n_size / sizeof(mbedtls_mpi_uint);
-    if (!m->p) {
+    size_t r_size = sizeof( r->n );
+    size_t p_size = r_size / sizeof( mbedtls_mpi_uint );
+    if ( m->n > 0 && p_size > m->n ) {
+        return -1;
+    }
+    if ( m->p == NULL ) {
         MBEDTLS_MPI_CHK( mbedtls_mpi_grow( m, p_size ) );
     }
-    memset( m->p, 0, n_size );
-    memcpy( m->p, &r->n, n_size );
+    memset( m->p, 0, r_size );
+    memcpy( m->p, &r->n, r_size );
 
 cleanup:
 
@@ -1660,7 +1663,6 @@ int mbedtls_ge_set_xquad(mbedtls_fe *x, mbedtls_fe *y) {
 // TODO: refactor
 // create point from X
 int mbedtls_set_xo_var(mbedtls_fe *x, mbedtls_fe *y, int odd) {
-    int ret;
     if (!mbedtls_ge_set_xquad(x, y)) {
         return -1;
     }
@@ -1696,43 +1698,30 @@ cleanup:
     return( ret );
 }
 
-void print_m_buf_internal(unsigned char* prefix, unsigned char* buf, int blen)
-{
-    printf("Mbedtls internal %s uint buf\n", prefix);
-    for (int i=0; i<blen; i++) {
-        printf("%d ", buf[i]);
-    }
-    printf("\n=================================\n");
-}
+void mbedtls_fe_normalize_weak(mbedtls_fe *r) {
+    uint32_t t0 = r->n[0], t1 = r->n[1], t2 = r->n[2], t3 = r->n[3], t4 = r->n[4],
+             t5 = r->n[5], t6 = r->n[6], t7 = r->n[7], t8 = r->n[8], t9 = r->n[9];
 
-void print_m_big_buf_internal(unsigned char* prefix, mbedtls_mpi_uint* buf, int blen)
-{
-    printf("Mbedtls internal %s big uint buf\n", prefix);
-    for (int i=0; i<blen; i++) {
-        printf("%u ", buf[i]);
-    }
-    printf("\n=================================\n");
-}
+    /* Reduce t9 at the start so there will be at most a single carry from the first pass */
+    uint32_t x = t9 >> 22; t9 &= 0x03FFFFFUL;
 
-void print_m_32_buf_internal(unsigned char* prefix, uint32_t* buf, int blen)
-{
-    printf("Mbedtls internal %s big uint buf\n", prefix);
-    for (int i=0; i<blen; i++) {
-        printf("%u ", buf[i]);
-    }
-    printf("\n=================================\n");
-}
+    /* The first pass ensures the magnitude is 1, ... */
+    t0 += x * 0x3D1UL; t1 += (x << 6);
+    t1 += (t0 >> 26); t0 &= 0x3FFFFFFUL;
+    t2 += (t1 >> 26); t1 &= 0x3FFFFFFUL;
+    t3 += (t2 >> 26); t2 &= 0x3FFFFFFUL;
+    t4 += (t3 >> 26); t3 &= 0x3FFFFFFUL;
+    t5 += (t4 >> 26); t4 &= 0x3FFFFFFUL;
+    t6 += (t5 >> 26); t5 &= 0x3FFFFFFUL;
+    t7 += (t6 >> 26); t6 &= 0x3FFFFFFUL;
+    t8 += (t7 >> 26); t7 &= 0x3FFFFFFUL;
+    t9 += (t8 >> 26); t8 &= 0x3FFFFFFUL;
 
-void print_m_mpi_big_buf_internal(unsigned char* prefix, mbedtls_mpi* m)
-{
-    if (m->n <= 0 && !m->p) {
-        return;
-    }
-    printf("Mbedtls internal %s big uint buf\n", prefix);
-    for (int i=0; i<m->n; i++) {
-        printf("%u ", m->p[i]);
-    }
-    printf("\n=================================\n");
+    /* ... except for a possible carry at bit 22 of t9 (i.e. bit 256 of the field element) */
+    VERIFY_CHECK(t9 >> 23 == 0);
+
+    r->n[0] = t0; r->n[1] = t1; r->n[2] = t2; r->n[3] = t3; r->n[4] = t4;
+    r->n[5] = t5; r->n[6] = t6; r->n[7] = t7; r->n[8] = t8; r->n[9] = t9;
 }
 
 // 4X64
@@ -1769,6 +1758,707 @@ void mbedtls_fe_mul_int(mbedtls_fe *r, int a) {
     r->n[9] *= a;
 }
 
+int mbedtls_fe_normalizes_to_zero_var(mbedtls_fe *r) {
+    uint32_t t0, t1, t2, t3, t4, t5, t6, t7, t8, t9;
+    uint32_t z0, z1;
+    uint32_t x;
+
+    t0 = r->n[0];
+    t9 = r->n[9];
+
+    /* Reduce t9 at the start so there will be at most a single carry from the first pass */
+    x = t9 >> 22;
+
+    /* The first pass ensures the magnitude is 1, ... */
+    t0 += x * 0x3D1UL;
+
+    /* z0 tracks a possible raw value of 0, z1 tracks a possible raw value of P */
+    z0 = t0 & 0x3FFFFFFUL;
+    z1 = z0 ^ 0x3D0UL;
+
+    /* Fast return path should catch the majority of cases */
+    if ((z0 != 0UL) & (z1 != 0x3FFFFFFUL)) {
+        return 0;
+    }
+
+    t1 = r->n[1];
+    t2 = r->n[2];
+    t3 = r->n[3];
+    t4 = r->n[4];
+    t5 = r->n[5];
+    t6 = r->n[6];
+    t7 = r->n[7];
+    t8 = r->n[8];
+
+    t9 &= 0x03FFFFFUL;
+    t1 += (x << 6);
+
+    t1 += (t0 >> 26);
+    t2 += (t1 >> 26); t1 &= 0x3FFFFFFUL; z0 |= t1; z1 &= t1 ^ 0x40UL;
+    t3 += (t2 >> 26); t2 &= 0x3FFFFFFUL; z0 |= t2; z1 &= t2;
+    t4 += (t3 >> 26); t3 &= 0x3FFFFFFUL; z0 |= t3; z1 &= t3;
+    t5 += (t4 >> 26); t4 &= 0x3FFFFFFUL; z0 |= t4; z1 &= t4;
+    t6 += (t5 >> 26); t5 &= 0x3FFFFFFUL; z0 |= t5; z1 &= t5;
+    t7 += (t6 >> 26); t6 &= 0x3FFFFFFUL; z0 |= t6; z1 &= t6;
+    t8 += (t7 >> 26); t7 &= 0x3FFFFFFUL; z0 |= t7; z1 &= t7;
+    t9 += (t8 >> 26); t8 &= 0x3FFFFFFUL; z0 |= t8; z1 &= t8;
+                                         z0 |= t9; z1 &= t9 ^ 0x3C00000UL;
+
+    /* ... except for a possible carry at bit 22 of t9 (i.e. bit 256 of the field element) */
+    VERIFY_CHECK(t9 >> 23 == 0);
+
+    return (z0 == 0) | (z1 == 0x3FFFFFFUL);
+}
+
+void mbedtls_gej_set_ge(mbedtls_gej *r, const mbedtls_ge *a) {
+   r->infinity = a->infinity;
+   r->x = a->x;
+   r->y = a->y;
+   mbedtls_fe_set_int(&r->z, 1);
+}
+
+void mbedtls_gej_double_var(mbedtls_gej *r, const mbedtls_gej *a, mbedtls_fe *rzr) {
+    /* Operations: 3 mul, 4 sqr, 0 normalize, 12 mul_int/add/negate.
+     *
+     * Note that there is an implementation described at
+     *     https://hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#doubling-dbl-2009-l
+     * which trades a multiply for a square, but in practice this is actually slower,
+     * mainly because it requires more normalizations.
+     */
+    mbedtls_fe t1,t2,t3,t4;
+    /** For mbedtls, 2Q is infinity if and only if Q is infinity. This is because if 2Q = infinity,
+     *  Q must equal -Q, or that Q.y == -(Q.y), or Q.y is 0. For a point on y^2 = x^3 + 7 to have
+     *  y=0, x^3 must be -7 mod p. However, -7 has no cube root mod p.
+     *
+     *  Having said this, if this function receives a point on a sextic twist, e.g. by
+     *  a fault attack, it is possible for y to be 0. This happens for y^2 = x^3 + 6,
+     *  since -6 does have a cube root mod p. For this point, this function will not set
+     *  the infinity flag even though the point doubles to infinity, and the result
+     *  point will be gibberish (z = 0 but infinity = 0).
+     */
+    r->infinity = a->infinity;
+    if (r->infinity) {
+        if (rzr != NULL) {
+            mbedtls_fe_set_int(rzr, 1);
+        }
+        return;
+    }
+
+    if (rzr != NULL) {
+        *rzr = a->y;
+        mbedtls_fe_normalize_weak(rzr);
+        mbedtls_fe_mul_int(rzr, 2);
+    }
+
+    mbedtls_fe_mul(&r->z, &a->z, &a->y);
+    // print_gej(r);
+    mbedtls_fe_mul_int(&r->z, 2);       /* Z' = 2*Y*Z (2) */
+    mbedtls_fe_sqr(&t1, &a->x);
+    mbedtls_fe_mul_int(&t1, 3);         /* T1 = 3*X^2 (3) */
+    mbedtls_fe_sqr(&t2, &t1);           /* T2 = 9*X^4 (1) */
+    mbedtls_fe_sqr(&t3, &a->y);
+    mbedtls_fe_mul_int(&t3, 2);         /* T3 = 2*Y^2 (2) */
+    mbedtls_fe_sqr(&t4, &t3);
+    mbedtls_fe_mul_int(&t4, 2);         /* T4 = 8*Y^4 (2) */
+    mbedtls_fe_mul(&t3, &t3, &a->x);    /* T3 = 2*X*Y^2 (1) */
+    r->x = t3;
+    // print_gej(r);
+    mbedtls_fe_mul_int(&r->x, 4);       /* X' = 8*X*Y^2 (4) */
+    mbedtls_fe_negate(&r->x, &r->x, 4); /* X' = -8*X*Y^2 (5) */
+    mbedtls_fe_add(&r->x, &t2);         /* X' = 9*X^4 - 8*X*Y^2 (6) */
+    // print_gej(r);
+    mbedtls_fe_negate(&t2, &t2, 1);     /* T2 = -9*X^4 (2) */
+    mbedtls_fe_mul_int(&t3, 6);         /* T3 = 12*X*Y^2 (6) */
+    mbedtls_fe_add(&t3, &t2);           /* T3 = 12*X*Y^2 - 9*X^4 (8) */
+    mbedtls_fe_mul(&r->y, &t1, &t3);    /* Y' = 36*X^3*Y^2 - 27*X^6 (1) */
+    mbedtls_fe_negate(&t2, &t4, 2);     /* T2 = -8*Y^4 (3) */
+    mbedtls_fe_add(&r->y, &t2);         /* Y' = 36*X^3*Y^2 - 27*X^6 - 8*Y^4 (4) */
+    // print_gej(r);
+}
+
+void mbedtls_ge_set_gej_zinv(mbedtls_ge *r, mbedtls_gej *a, const mbedtls_fe *zi) {
+    mbedtls_fe zi2;
+    mbedtls_fe zi3;
+    mbedtls_fe_sqr(&zi2, zi);
+    mbedtls_fe_mul(&zi3, &zi2, zi);
+    mbedtls_fe_mul(&r->x, &a->x, &zi2);
+    mbedtls_fe_mul(&r->y, &a->y, &zi3);
+    r->infinity = a->infinity;
+}
+
+void mbedtls_gej_add_ge_var(mbedtls_gej *r, mbedtls_gej *a, mbedtls_ge *b, mbedtls_fe *rzr) {
+    /* 8 mul, 3 sqr, 4 normalize, 12 mul_int/add/negate */
+    mbedtls_fe z12, u1, u2, s1, s2, h, i, i2, h2, h3, t;
+    if (a->infinity) {
+        VERIFY_CHECK(rzr == NULL);
+        mbedtls_gej_set_ge(r, b);
+        return;
+    }
+    if (b->infinity) {
+        if (rzr != NULL) {
+            mbedtls_fe_set_int(rzr, 1);
+        }
+        *r = *a;
+        return;
+    }
+    r->infinity = 0;
+
+    mbedtls_fe_sqr(&z12, &a->z);
+    u1 = a->x; mbedtls_fe_normalize_weak(&u1);
+    mbedtls_fe_mul(&u2, &b->x, &z12);
+    s1 = a->y; mbedtls_fe_normalize_weak(&s1);
+    mbedtls_fe_mul(&s2, &b->y, &z12); mbedtls_fe_mul(&s2, &s2, &a->z);
+    mbedtls_fe_negate(&h, &u1, 1); mbedtls_fe_add(&h, &u2);
+    mbedtls_fe_negate(&i, &s1, 1); mbedtls_fe_add(&i, &s2);
+    if (mbedtls_fe_normalizes_to_zero_var(&h)) {
+        if (mbedtls_fe_normalizes_to_zero_var(&i)) {
+            mbedtls_gej_double_var(r, a, rzr);
+        } else {
+            if (rzr != NULL) {
+                mbedtls_fe_set_int(rzr, 0);
+            }
+            r->infinity = 1;
+        }
+        return;
+    }
+    mbedtls_fe_sqr(&i2, &i);
+    mbedtls_fe_sqr(&h2, &h);
+    mbedtls_fe_mul(&h3, &h, &h2);
+    if (rzr != NULL) {
+        *rzr = h;
+    }
+    mbedtls_fe_mul(&r->z, &a->z, &h);
+    mbedtls_fe_mul(&t, &u1, &h2);
+    r->x = t; mbedtls_fe_mul_int(&r->x, 2); mbedtls_fe_add(&r->x, &h3); mbedtls_fe_negate(&r->x, &r->x, 3); mbedtls_fe_add(&r->x, &i2);
+    mbedtls_fe_negate(&r->y, &r->x, 5); mbedtls_fe_add(&r->y, &t); mbedtls_fe_mul(&r->y, &r->y, &i);
+    mbedtls_fe_mul(&h3, &h3, &s1); mbedtls_fe_negate(&h3, &h3, 1);
+    mbedtls_fe_add(&r->y, &h3);
+}
+
+void mbedtls_gej_add_zinv_var(mbedtls_gej *r, const mbedtls_gej *a, const mbedtls_ge *b, const mbedtls_fe *bzinv) {
+    /* 9 mul, 3 sqr, 4 normalize, 12 mul_int/add/negate */
+    mbedtls_fe az, z12, u1, u2, s1, s2, h, i, i2, h2, h3, t;
+
+    if (b->infinity) {
+        *r = *a;
+        return;
+    }
+    if (a->infinity) {
+        mbedtls_fe bzinv2, bzinv3;
+        r->infinity = b->infinity;
+        mbedtls_fe_sqr(&bzinv2, bzinv);
+        mbedtls_fe_mul(&bzinv3, &bzinv2, bzinv);
+        mbedtls_fe_mul(&r->x, &b->x, &bzinv2);
+        mbedtls_fe_mul(&r->y, &b->y, &bzinv3);
+        mbedtls_fe_set_int(&r->z, 1);
+        return;
+    }
+    r->infinity = 0;
+
+    /** We need to calculate (rx,ry,rz) = (ax,ay,az) + (bx,by,1/bzinv). Due to
+     *  mbedtls's isomorphism we can multiply the Z coordinates on both sides
+     *  by bzinv, and get: (rx,ry,rz*bzinv) = (ax,ay,az*bzinv) + (bx,by,1).
+     *  This means that (rx,ry,rz) can be calculated as
+     *  (ax,ay,az*bzinv) + (bx,by,1), when not applying the bzinv factor to rz.
+     *  The variable az below holds the modified Z coordinate for a, which is used
+     *  for the computation of rx and ry, but not for rz.
+     */
+    mbedtls_fe_mul(&az, &a->z, bzinv);
+
+    mbedtls_fe_sqr(&z12, &az);
+    u1 = a->x; mbedtls_fe_normalize_weak(&u1);
+    mbedtls_fe_mul(&u2, &b->x, &z12);
+    s1 = a->y; mbedtls_fe_normalize_weak(&s1);
+    mbedtls_fe_mul(&s2, &b->y, &z12); mbedtls_fe_mul(&s2, &s2, &az);
+    mbedtls_fe_negate(&h, &u1, 1); mbedtls_fe_add(&h, &u2);
+    mbedtls_fe_negate(&i, &s1, 1); mbedtls_fe_add(&i, &s2);
+    if (mbedtls_fe_normalizes_to_zero_var(&h)) {
+        if (mbedtls_fe_normalizes_to_zero_var(&i)) {
+            mbedtls_gej_double_var(r, a, NULL);
+        } else {
+            r->infinity = 1;
+        }
+        return;
+    }
+    mbedtls_fe_sqr(&i2, &i);
+    mbedtls_fe_sqr(&h2, &h);
+    mbedtls_fe_mul(&h3, &h, &h2);
+    r->z = a->z; mbedtls_fe_mul(&r->z, &r->z, &h);
+    mbedtls_fe_mul(&t, &u1, &h2);
+    r->x = t; mbedtls_fe_mul_int(&r->x, 2); mbedtls_fe_add(&r->x, &h3); mbedtls_fe_negate(&r->x, &r->x, 3); mbedtls_fe_add(&r->x, &i2);
+    mbedtls_fe_negate(&r->y, &r->x, 5); mbedtls_fe_add(&r->y, &t); mbedtls_fe_mul(&r->y, &r->y, &i);
+    mbedtls_fe_mul(&h3, &h3, &s1); mbedtls_fe_negate(&h3, &h3, 1);
+    mbedtls_fe_add(&r->y, &h3);
+}
+
+/** Fill a table 'prej' with precomputed odd multiples of a. Prej will contain
+ *  the values [1*a,3*a,...,(2*n-1)*a], so it space for n values. zr[0] will
+ *  contain prej[0].z / a.z. The other zr[i] values = prej[i].z / prej[i-1].z.
+ *  Prej's Z values are undefined, except for the last value.
+ */
+void mbedtls_ecmult_odd_multiples_table(int n, mbedtls_gej *prej, mbedtls_fe *zr, mbedtls_gej *a) {
+    mbedtls_gej d;
+    mbedtls_ge a_ge, d_ge;
+    int i;
+
+    VERIFY_CHECK(!a->infinity);
+    mbedtls_gej_double_var(&d, a, NULL);
+
+    /*
+     * Perform the additions on an isomorphism where 'd' is affine: drop the z coordinate
+     * of 'd', and scale the 1P starting value's x/y coordinates without changing its z.
+     */
+    d_ge.x = d.x;
+    d_ge.y = d.y;
+    d_ge.infinity = 0;
+
+    // print_gej(&d);
+
+    mbedtls_ge_set_gej_zinv(&a_ge, a, &d.z);
+    // print_ge(&a_ge);
+    prej[0].x = a_ge.x;
+    prej[0].y = a_ge.y;
+    prej[0].z = a->z;
+    prej[0].infinity = 0;
+
+    zr[0] = d.z;
+    for (i = 1; i < n; i++) {
+        mbedtls_gej_add_ge_var(&prej[i], &prej[i-1], &d_ge, &zr[i]);
+    }
+
+    /*
+     * Each point in 'prej' has a z coordinate too small by a factor of 'd.z'. Only
+     * the final point's z coordinate is actually used though, so just update that.
+     */
+    mbedtls_fe_mul(&prej[n-1].z, &prej[n-1].z, &d.z);
+}
+
+void mbedtls_ge_globalz_set_table_gej(size_t len, mbedtls_ge *r, mbedtls_fe *globalz, const mbedtls_gej *a, const mbedtls_fe *zr) {
+    size_t i = len - 1;
+    mbedtls_fe zs;
+
+    if (len > 0) {
+        /* The z of the final point gives us the "global Z" for the table. */
+        r[i].x = a[i].x;
+        r[i].y = a[i].y;
+        *globalz = a[i].z;
+        r[i].infinity = 0;
+        zs = zr[i];
+
+        /* Work our way backwards, using the z-ratios to scale the x/y values. */
+        while (i > 0) {
+            if (i != len - 1) {
+                mbedtls_fe_mul(&zs, &zs, &zr[i]);
+            }
+            i--;
+            mbedtls_ge_set_gej_zinv(&r[i], &a[i], &zs);
+        }
+    }
+}
+
+/** Fill a table 'pre' with precomputed odd multiples of a.
+ *
+ *  There are two versions of this function:
+ *  - secp256k1_ecmult_odd_multiples_table_globalz_windowa which brings its
+ *    resulting point set to a single constant Z denominator, stores the X and Y
+ *    coordinates as ge_storage points in pre, and stores the global Z in rz.
+ *    It only operates on tables sized for WINDOW_A wnaf multiples.
+ *  - secp256k1_ecmult_odd_multiples_table_storage_var, which converts its
+ *    resulting point set to actually affine points, and stores those in pre.
+ *    It operates on tables of any size, but uses heap-allocated temporaries.
+ *
+ *  To compute a*P + b*G, we compute a table for P using the first function,
+ *  and for G using the second (which requires an inverse, but it only needs to
+ *  happen once).
+ */
+void mbedtls_ecmult_odd_multiples_table_globalz_windowa(mbedtls_ecp_group *grp, mbedtls_ge *pre, mbedtls_fe *globalz, mbedtls_gej *a, int window_size) {
+    mbedtls_gej prej[ECMULT_TABLE_SIZE(window_size)];
+    mbedtls_fe zr[ECMULT_TABLE_SIZE(window_size)];
+
+    /* Compute the odd multiples in Jacobian form. */
+    mbedtls_ecmult_odd_multiples_table(ECMULT_TABLE_SIZE(window_size), &prej, &zr, a);
+    /* Bring them to the same Z denominator. */
+    mbedtls_ge_globalz_set_table_gej(ECMULT_TABLE_SIZE(window_size), pre, globalz, &prej, &zr);
+}
+
+/** Convert a number to WNAF notation. The number becomes represented by sum(2^i * wnaf[i], i=0..bits),
+ *  with the following guarantees:
+ *  - each wnaf[i] is either 0, or an odd integer between -(1<<(w-1) - 1) and (1<<(w-1) - 1)
+ *  - two non-zero entries in wnaf are separated by at least w-1 zeroes.
+ *  - the number of set values in wnaf is returned. This number is at most 256, and at most one more
+ *    than the number of bits in the (absolute value) of the input.
+ */
+int mbedtls_ecmult_wnaf(mbedtls_ecp_group *grp, int *wnaf, int len, mbedtls_mpi *a, int w) {
+    int last_set_bit = -1;
+    int bit = 0;
+    int sign = 1;
+    int carry = 0;
+    mbedtls_mpi s, sn;
+    mbedtls_mpi_init(&s);mbedtls_mpi_init(&sn);
+
+    VERIFY_CHECK(wnaf != NULL);
+    VERIFY_CHECK(0 <= len && len <= 256);
+    VERIFY_CHECK(a != NULL);
+    VERIFY_CHECK(2 <= w && w <= 31);
+
+    memset(wnaf, 0, len * sizeof(wnaf[0]));
+
+    if (mbedtls_mpi_get_bits(a, 255, 1)) {
+        mbedtls_mpi_sub_mpi( &sn, &grp->N, a );
+        mbedtls_mpi_mod_mpi( &s, &sn, &grp->N );
+        sign = -1;
+    } else {
+        mbedtls_mpi_copy(&s, a);
+    }
+
+    while ( bit < len ) {
+        int now;
+        int word;
+        if ( mbedtls_mpi_get_bits( &s, bit, 1 ) == (unsigned int) carry ) {
+            bit++;
+            continue;
+        }
+
+        now = w;
+        if ( now > len - bit ) {
+            now = len - bit;
+        }
+
+        word = mbedtls_mpi_get_bits_var( &s, bit, now ) + carry;
+
+        carry = ( word >> ( w - 1 ) ) & 1;
+        word -= carry << w;
+
+        wnaf[bit] = sign * word;
+        last_set_bit = bit;
+
+        bit += now;
+    }
+    mbedtls_mpi_free(&s);mbedtls_mpi_free(&sn);
+    return last_set_bit + 1;
+}
+
+void mbedtls_fe_clear(mbedtls_fe *a) {
+    int i;
+    for (i=0; i<10; i++) {
+        a->n[i] = 0;
+    }
+}
+
+void mbedtls_gej_set_infinity(mbedtls_gej *r) {
+    r->infinity = 1;
+    mbedtls_fe_clear(&r->x);
+    mbedtls_fe_clear(&r->y);
+    mbedtls_fe_clear(&r->z);
+}
+
+
+void mbedtls_ge_neg(mbedtls_ge *r, const mbedtls_ge *a) {
+    *r = *a;
+    mbedtls_fe_normalize_weak(&r->y);
+    mbedtls_fe_negate(&r->y, &r->y, 1);
+}
+
+void mbedtls_fe_from_storage(mbedtls_fe *r, const mbedtls_fe_storage *a) {
+    r->n[0] = a->n[0] & 0x3FFFFFFUL;
+    r->n[1] = a->n[0] >> 26 | ((a->n[1] << 6) & 0x3FFFFFFUL);
+    r->n[2] = a->n[1] >> 20 | ((a->n[2] << 12) & 0x3FFFFFFUL);
+    r->n[3] = a->n[2] >> 14 | ((a->n[3] << 18) & 0x3FFFFFFUL);
+    r->n[4] = a->n[3] >> 8 | ((a->n[4] << 24) & 0x3FFFFFFUL);
+    r->n[5] = (a->n[4] >> 2) & 0x3FFFFFFUL;
+    r->n[6] = a->n[4] >> 28 | ((a->n[5] << 4) & 0x3FFFFFFUL);
+    r->n[7] = a->n[5] >> 22 | ((a->n[6] << 10) & 0x3FFFFFFUL);
+    r->n[8] = a->n[6] >> 16 | ((a->n[7] << 16) & 0x3FFFFFFUL);
+    r->n[9] = a->n[7] >> 10;
+}
+
+void mbedtls_fe_to_storage(mbedtls_fe_storage *r, const mbedtls_fe *a) {
+    r->n[0] = a->n[0] | a->n[1] << 26;
+    r->n[1] = a->n[1] >> 6 | a->n[2] << 20;
+    r->n[2] = a->n[2] >> 12 | a->n[3] << 14;
+    r->n[3] = a->n[3] >> 18 | a->n[4] << 8;
+    r->n[4] = a->n[4] >> 24 | a->n[5] << 2 | a->n[6] << 28;
+    r->n[5] = a->n[6] >> 4 | a->n[7] << 22;
+    r->n[6] = a->n[7] >> 10 | a->n[8] << 16;
+    r->n[7] = a->n[8] >> 16 | a->n[9] << 10;
+}
+
+void mbedtls_fe_normalize(mbedtls_fe *r) {
+    uint32_t t0 = r->n[0], t1 = r->n[1], t2 = r->n[2], t3 = r->n[3], t4 = r->n[4],
+             t5 = r->n[5], t6 = r->n[6], t7 = r->n[7], t8 = r->n[8], t9 = r->n[9];
+
+    /* Reduce t9 at the start so there will be at most a single carry from the first pass */
+    uint32_t m;
+    uint32_t x = t9 >> 22; t9 &= 0x03FFFFFUL;
+
+    /* The first pass ensures the magnitude is 1, ... */
+    t0 += x * 0x3D1UL; t1 += (x << 6);
+    t1 += (t0 >> 26); t0 &= 0x3FFFFFFUL;
+    t2 += (t1 >> 26); t1 &= 0x3FFFFFFUL;
+    t3 += (t2 >> 26); t2 &= 0x3FFFFFFUL; m = t2;
+    t4 += (t3 >> 26); t3 &= 0x3FFFFFFUL; m &= t3;
+    t5 += (t4 >> 26); t4 &= 0x3FFFFFFUL; m &= t4;
+    t6 += (t5 >> 26); t5 &= 0x3FFFFFFUL; m &= t5;
+    t7 += (t6 >> 26); t6 &= 0x3FFFFFFUL; m &= t6;
+    t8 += (t7 >> 26); t7 &= 0x3FFFFFFUL; m &= t7;
+    t9 += (t8 >> 26); t8 &= 0x3FFFFFFUL; m &= t8;
+
+    /* ... except for a possible carry at bit 22 of t9 (i.e. bit 256 of the field element) */
+    VERIFY_CHECK(t9 >> 23 == 0);
+
+    /* At most a single final reduction is needed; check if the value is >= the field characteristic */
+    x = (t9 >> 22) | ((t9 == 0x03FFFFFUL) & (m == 0x3FFFFFFUL)
+        & ((t1 + 0x40UL + ((t0 + 0x3D1UL) >> 26)) > 0x3FFFFFFUL));
+
+    /* Apply the final reduction (for constant-time behaviour, we do it always) */
+    t0 += x * 0x3D1UL; t1 += (x << 6);
+    t1 += (t0 >> 26); t0 &= 0x3FFFFFFUL;
+    t2 += (t1 >> 26); t1 &= 0x3FFFFFFUL;
+    t3 += (t2 >> 26); t2 &= 0x3FFFFFFUL;
+    t4 += (t3 >> 26); t3 &= 0x3FFFFFFUL;
+    t5 += (t4 >> 26); t4 &= 0x3FFFFFFUL;
+    t6 += (t5 >> 26); t5 &= 0x3FFFFFFUL;
+    t7 += (t6 >> 26); t6 &= 0x3FFFFFFUL;
+    t8 += (t7 >> 26); t7 &= 0x3FFFFFFUL;
+    t9 += (t8 >> 26); t8 &= 0x3FFFFFFUL;
+
+    /* If t9 didn't carry to bit 22 already, then it should have after any final reduction */
+    VERIFY_CHECK(t9 >> 22 == x);
+
+    /* Mask off the possible multiple of 2^256 from the final reduction */
+    t9 &= 0x03FFFFFUL;
+
+    r->n[0] = t0; r->n[1] = t1; r->n[2] = t2; r->n[3] = t3; r->n[4] = t4;
+    r->n[5] = t5; r->n[6] = t6; r->n[7] = t7; r->n[8] = t8; r->n[9] = t9;
+}
+
+void mbedtls_ge_from_storage(mbedtls_ge *r, const mbedtls_ge_storage *a) {
+    mbedtls_fe_from_storage(&r->x, &a->x);
+    mbedtls_fe_from_storage(&r->y, &a->y);
+    r->infinity = 0;
+}
+
+void mbedtls_ge_to_storage(mbedtls_ge_storage *r, const mbedtls_ge *a) {
+    mbedtls_fe x, y;
+    VERIFY_CHECK(!a->infinity);
+    x = a->x;
+    mbedtls_fe_normalize(&x);
+    y = a->y;
+    mbedtls_fe_normalize(&y);
+    mbedtls_fe_to_storage(&r->x, &x);
+    mbedtls_fe_to_storage(&r->y, &y);
+}
+
+void mbedtls_fe_inv(mbedtls_fe *r, const mbedtls_fe *a) {
+    mbedtls_fe x2, x3, x6, x9, x11, x22, x44, x88, x176, x220, x223, t1;
+    int j;
+
+    /** The binary representation of (p - 2) has 5 blocks of 1s, with lengths in
+     *  { 1, 2, 22, 223 }. Use an addition chain to calculate 2^n - 1 for each block:
+     *  [1], [2], 3, 6, 9, 11, [22], 44, 88, 176, 220, [223]
+     */
+
+    mbedtls_fe_sqr(&x2, a);
+    mbedtls_fe_mul(&x2, &x2, a);
+
+    mbedtls_fe_sqr(&x3, &x2);
+    mbedtls_fe_mul(&x3, &x3, a);
+
+    x6 = x3;
+    for (j=0; j<3; j++) {
+        mbedtls_fe_sqr(&x6, &x6);
+    }
+    mbedtls_fe_mul(&x6, &x6, &x3);
+
+    x9 = x6;
+    for (j=0; j<3; j++) {
+        mbedtls_fe_sqr(&x9, &x9);
+    }
+    mbedtls_fe_mul(&x9, &x9, &x3);
+
+    x11 = x9;
+    for (j=0; j<2; j++) {
+        mbedtls_fe_sqr(&x11, &x11);
+    }
+    mbedtls_fe_mul(&x11, &x11, &x2);
+
+    x22 = x11;
+    for (j=0; j<11; j++) {
+        mbedtls_fe_sqr(&x22, &x22);
+    }
+    mbedtls_fe_mul(&x22, &x22, &x11);
+
+    x44 = x22;
+    for (j=0; j<22; j++) {
+        mbedtls_fe_sqr(&x44, &x44);
+    }
+    mbedtls_fe_mul(&x44, &x44, &x22);
+
+    x88 = x44;
+    for (j=0; j<44; j++) {
+        mbedtls_fe_sqr(&x88, &x88);
+    }
+    mbedtls_fe_mul(&x88, &x88, &x44);
+
+    x176 = x88;
+    for (j=0; j<88; j++) {
+        mbedtls_fe_sqr(&x176, &x176);
+    }
+    mbedtls_fe_mul(&x176, &x176, &x88);
+
+    x220 = x176;
+    for (j=0; j<44; j++) {
+        mbedtls_fe_sqr(&x220, &x220);
+    }
+    mbedtls_fe_mul(&x220, &x220, &x44);
+
+    x223 = x220;
+    for (j=0; j<3; j++) {
+        mbedtls_fe_sqr(&x223, &x223);
+    }
+    mbedtls_fe_mul(&x223, &x223, &x3);
+
+    /* The final result is then assembled using a sliding window over the blocks. */
+
+    t1 = x223;
+    for (j=0; j<23; j++) {
+        mbedtls_fe_sqr(&t1, &t1);
+    }
+    mbedtls_fe_mul(&t1, &t1, &x22);
+    for (j=0; j<5; j++) {
+        mbedtls_fe_sqr(&t1, &t1);
+    }
+    mbedtls_fe_mul(&t1, &t1, a);
+    for (j=0; j<3; j++) {
+        mbedtls_fe_sqr(&t1, &t1);
+    }
+    mbedtls_fe_mul(&t1, &t1, &x2);
+    for (j=0; j<2; j++) {
+        mbedtls_fe_sqr(&t1, &t1);
+    }
+    mbedtls_fe_mul(r, a, &t1);
+}
+
+void mbedtls_ge_set_table_gej_var(mbedtls_ge *r, const mbedtls_gej *a, const mbedtls_fe *zr, size_t len) {
+    size_t i = len - 1;
+    mbedtls_fe zi;
+
+    if (len > 0) {
+        /* Compute the inverse of the last z coordinate, and use it to compute the last affine output. */
+        mbedtls_fe_inv(&zi, &a[i].z);
+        mbedtls_ge_set_gej_zinv(&r[i], &a[i], &zi);
+
+        /* Work out way backwards, using the z-ratios to scale the x/y values. */
+        while (i > 0) {
+            mbedtls_fe_mul(&zi, &zi, &zr[i]);
+            i--;
+            mbedtls_ge_set_gej_zinv(&r[i], &a[i], &zi);
+        }
+    }
+}
+
+int mbedtls_ecmult_odd_multiples_table_storage_var(int n, mbedtls_ge_storage *pre, mbedtls_gej *a) {
+    int ret;
+    mbedtls_gej *prej = (mbedtls_gej*) malloc(sizeof(mbedtls_gej) * n);
+    mbedtls_ge *prea = (mbedtls_ge*) malloc(sizeof(mbedtls_ge) * n);
+    mbedtls_fe *zr = (mbedtls_fe*) malloc(sizeof(mbedtls_fe) * n);
+    ECDSA_VALIDATE_RET( prej != NULL );
+    ECDSA_VALIDATE_RET( prea != NULL );
+    ECDSA_VALIDATE_RET( zr != NULL );
+    int i;
+
+    /* Compute the odd multiples in Jacobian form. */
+    mbedtls_ecmult_odd_multiples_table(n, prej, zr, a);
+    /* Convert them in batch to affine coordinates. */
+    mbedtls_ge_set_table_gej_var(prea, prej, zr, n);
+    /* Convert them to compact storage form. */
+    for (i = 0; i < n; i++) {
+        mbedtls_ge_to_storage(&pre[i], &prea[i]);
+    }
+
+    free(prea);
+    free(prej);
+    free(zr);
+
+cleanup:
+
+    return( ret );
+}
+
+void mbedtls_ecmult(mbedtls_ecp_group *grp, mbedtls_ge_storage *pre_g, mbedtls_gej *r, mbedtls_gej *a, mbedtls_mpi *na, mbedtls_mpi *ng, int window_size_a, int window_size_g) {
+    mbedtls_ge pre_a[ECMULT_TABLE_SIZE(window_size_a)];
+    mbedtls_ge tmpa;
+    mbedtls_fe Z;
+    int wnaf_na[256];
+    int bits_na;
+    int wnaf_ng[256];
+    int bits_ng;
+    int i;
+    int bits;
+
+    /* build wnaf representation for na. */
+    bits_na = mbedtls_ecmult_wnaf(grp, &wnaf_na, 256, na, window_size_a);
+    bits = bits_na;
+
+    /* Calculate odd multiples of a.
+     * All multiples are brought to the same Z 'denominator', which is stored
+     * in Z. Due to secp256k1' isomorphism we can do all operations pretending
+     * that the Z coordinate was 1, use affine addition formulae, and correct
+     * the Z coordinate of the result once at the end.
+     * The exception is the precomputed G table points, which are actually
+     * affine. Compared to the base used for other points, they have a Z ratio
+     * of 1/Z, so we can use secp256k1_gej_add_zinv_var, which uses the same
+     * isomorphism to efficiently add with a known Z inverse.
+     */
+    mbedtls_ecmult_odd_multiples_table_globalz_windowa(grp, &pre_a, &Z, a, window_size_a);
+
+    int total = ECMULT_TABLE_SIZE(window_size_a);
+
+    bits_ng = mbedtls_ecmult_wnaf(grp, &wnaf_ng, 256, ng, window_size_g);
+    if (bits_ng > bits) {
+        bits = bits_ng;
+    }
+
+    mbedtls_gej_set_infinity(r);
+
+    for (i = bits - 1; i >= 0; i--) {
+        int n;
+        mbedtls_gej_double_var(r, r, NULL);
+        if (i < bits_na && (n = wnaf_na[i])) {
+            ECMULT_TABLE_GET_GE(&tmpa, pre_a, n, window_size_a);
+            mbedtls_gej_add_ge_var(r, r, &tmpa, NULL);
+        }
+        if (i < bits_ng && (n = wnaf_ng[i])) {
+            ECMULT_TABLE_GET_GE_STORAGE(&tmpa, pre_g, n, window_size_g);
+            mbedtls_gej_add_zinv_var(r, r, &tmpa, &Z);
+        }
+    }
+
+    if (!r->infinity) {
+        mbedtls_fe_mul(&r->z, &r->z, &Z);
+    }
+}
+
+void mbedtls_fe_inv_var(mbedtls_fe *r, const mbedtls_fe *a) {
+    mbedtls_fe_inv(r, a);
+}
+
+void mbedtls_ge_set_gej_var(mbedtls_ge *r, mbedtls_gej *a) {
+    mbedtls_fe z2, z3;
+    r->infinity = a->infinity;
+    if (a->infinity) {
+        return;
+    }
+    mbedtls_fe_inv_var(&a->z, &a->z);
+    mbedtls_fe_sqr(&z2, &a->z);
+    mbedtls_fe_mul(&z3, &a->z, &z2);
+    mbedtls_fe_mul(&a->x, &a->x, &z2);
+    mbedtls_fe_mul(&a->y, &a->y, &z3);
+    mbedtls_fe_set_int(&a->z, 1);
+    r->x = a->x;
+    r->y = a->y;
+}
+
 /*
  * Recover ECDSA public key from ECDSA signature of a hashed message
  * Should initialize mbedtls_ecp_point first
@@ -1780,6 +2470,7 @@ void mbedtls_fe_mul_int(mbedtls_fe *r, int a) {
  * WNAF Notation
  * MOVE p mod n to grp
  * Recovery process:
+ * Use mbedtls ecp defined type
  */
 int ecdsa_sig_recover( mbedtls_ecp_group *grp,
                 mbedtls_mpi *r, mbedtls_mpi *s, int recid,
@@ -1794,16 +2485,26 @@ int ecdsa_sig_recover( mbedtls_ecp_group *grp,
     ECDSA_VALIDATE_RET( recid >=0 && recid < 4 );
 
     int ret;
-    mbedtls_ecp_point fx;
-    mbedtls_ecp_point qj;
+    // mbedtls_ecp_point fx;
+    // mbedtls_ecp_point qj;
+    mbedtls_gej xj;
+    mbedtls_gej qj;
+    mbedtls_gej gj;
+    mbedtls_ge pubkey;
     mbedtls_fe fe;
     mbedtls_fe fy;
     mbedtls_fe fe_order;
     mbedtls_mpi pmo, m, rn, u1, u2, rnm, mn, u1n, sn;
-    mbedtls_ecp_point_init(&fx);mbedtls_ecp_point_init(&qj);
+    mbedtls_ge_storage (*pre_g)[];
+    // int window_size = grp->nbits >= 384 ? 5 : 4;
+    // default is 5
+    int window_size_a = 5;
+    int window_size_g = 16;
+    // mbedtls_ecp_point_init(&fx);mbedtls_ecp_point_init(&qj);
     mbedtls_mpi_init(&pmo);mbedtls_mpi_init(&m);mbedtls_mpi_init(&rn);mbedtls_mpi_init(&u1);mbedtls_mpi_init(&u2);
     mbedtls_mpi_init(&rnm);mbedtls_mpi_init(&mn);mbedtls_mpi_init(&sn);
     // TODO: change hardcode parameter
+    // MBEDTLS_MPI_CHK( ecp_mpi_load( &pmo, &secp256k1_p_minus_order, sizeof( secp256k1_p_minus_order ) ) );
     MBEDTLS_MPI_CHK( mbedtls_mpi_read_string( &pmo, 16, "014551231950B75FC4402DA1722FC9BAEE" ) );
     MBEDTLS_MPI_CHK( mbedtls_mpi_read_binary(&m, buf, blen) );
     MBEDTLS_MPI_CHK( mbedtls_fe_set_b32( &fe, r ) );
@@ -1817,9 +2518,13 @@ int ecdsa_sig_recover( mbedtls_ecp_group *grp,
     }
     // generate point from the x
     MBEDTLS_MPI_CHK( mbedtls_set_xo_var( &fe, &fy, recid & 1 ) );
-    MBEDTLS_MPI_CHK( mbedtls_mpi_add_int( &fx.Z, &fx.Z, 1 ) );
-    MBEDTLS_MPI_CHK( mbedtls_fe_to_mpi( &fe, &fx.X ) );
-    MBEDTLS_MPI_CHK( mbedtls_fe_to_mpi( &fy, &fx.Y ) );
+    // MBEDTLS_MPI_CHK( mbedtls_mpi_add_int( &fx.Z, &fx.Z, 1 ) );
+    // MBEDTLS_MPI_CHK( mbedtls_fe_to_mpi( &fe, &fx.X ) );
+    // MBEDTLS_MPI_CHK( mbedtls_fe_to_mpi( &fy, &fx.Y ) );
+    xj.x = fe;
+    xj.y = fy;
+    xj.infinity = 0;
+    mbedtls_fe_set_int(&xj.z, 1);
 
     MBEDTLS_MPI_CHK( mbedtls_mpi_inv_mod( &rn, r, &grp->N ) );
     MBEDTLS_MPI_CHK( mbedtls_mpi_sub_mpi( &mn, &grp->N, &m ) );
@@ -1828,9 +2533,24 @@ int ecdsa_sig_recover( mbedtls_ecp_group *grp,
     MBEDTLS_MPI_CHK( mbedtls_mpi_mul_mpi( &sn, s, &rn ) );
     MBEDTLS_MPI_CHK( mbedtls_mpi_mod_mpi( &u2, &sn, &grp->N ) );
 
+    // initialize pre_g
+    mbedtls_gej_set_ge(&gj, &mbedtls_ge_const_g);
+    pre_g = (mbedtls_ge_storage (*)[]) malloc(sizeof((*pre_g)[0]) * ECMULT_TABLE_SIZE(window_size_g));
+    ECDSA_VALIDATE_RET( pre_g != NULL );
+
+    /* precompute the tables with odd multiples */
+    mbedtls_ecmult_odd_multiples_table_storage_var(ECMULT_TABLE_SIZE(window_size_g), pre_g, &gj);
+
+    mbedtls_ecmult(grp, pre_g, &qj, &xj, &u2, &u1, window_size_a, window_size_g);
+    mbedtls_ge_set_gej_var(&pubkey, &qj);
+    mbedtls_fe_to_mpi(&pubkey.x, &Q->X);
+    mbedtls_fe_to_mpi(&pubkey.y, &Q->Y);
+    ret = qj.infinity;
+    free(pre_g);
+
 cleanup:
 
-    mbedtls_ecp_point_free(&fx);mbedtls_ecp_point_init(&qj);
+    // mbedtls_ecp_point_free(&fx);mbedtls_ecp_point_init(&qj);
     mbedtls_mpi_free(&pmo);mbedtls_mpi_free(&m);mbedtls_mpi_free(&rn);mbedtls_mpi_free(&u1);mbedtls_mpi_free(&u2);
     mbedtls_mpi_free(&rnm);mbedtls_mpi_free(&mn);mbedtls_mpi_free(&sn);
 
@@ -2005,8 +2725,6 @@ int mbedtls_ecdsa_sign_det_recoverable( mbedtls_ecp_group *grp, mbedtls_mpi *r, 
     ECDSA_VALIDATE_RET( d     != NULL );
     ECDSA_VALIDATE_RET( recid != NULL );
     ECDSA_VALIDATE_RET( buf   != NULL || blen == 0 );
-
-    mbedtls_printf("You are in\n");
 
     int ret;
     mbedtls_hmac_drbg_context rng_ctx;

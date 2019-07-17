@@ -49,19 +49,19 @@
 #define VERIFY_BITS(x, n) do { } while(0)
 #endif
 
-#if defined(SECP256K1_BUILD) && defined(VERIFY)
-# define SECP256K1_RESTRICT
+#if defined(MBEDTLS_BUILD) && defined(VERIFY)
+# define MBEDTLS_RESTRICT
 #else
 # if (!defined(__STDC_VERSION__) || (__STDC_VERSION__ < 199901L) )
-#  if SECP256K1_GNUC_PREREQ(3,0)
-#   define SECP256K1_RESTRICT __restrict__
+#  if MBEDTLS_GNUC_PREREQ(3,0)
+#   define MBEDTLS_RESTRICT __restrict__
 #  elif (defined(_MSC_VER) && _MSC_VER >= 1400)
-#   define SECP256K1_RESTRICT __restrict
+#   define MBEDTLS_RESTRICT __restrict
 #  else
-#   define SECP256K1_RESTRICT
+#   define MBEDTLS_RESTRICT
 #  endif
 # else
-#  define SECP256K1_RESTRICT restrict
+#  define MBEDTLS_RESTRICT restrict
 # endif
 #endif
 
@@ -95,8 +95,80 @@ typedef struct {
     uint32_t n[10];
 } mbedtls_fe;
 
+typedef struct {
+    mbedtls_fe x;
+    mbedtls_fe y;
+    int infinity; /* whether this represents the point at infinity */
+} mbedtls_ge;
+
+typedef struct {
+    mbedtls_fe x; /* actual X: x/z^2 */
+    mbedtls_fe y; /* actual Y: y/z^3 */
+    mbedtls_fe z;
+    int infinity; /* whether this represents the point at infinity */
+} mbedtls_gej;
+
+typedef struct {
+    uint32_t n[8];
+} mbedtls_fe_storage;
+
+typedef struct {
+    mbedtls_fe_storage x;
+    mbedtls_fe_storage y;
+} mbedtls_ge_storage;
+
 /** The number of entries a table with precomputed multiples needs to have. */
 #define ECMULT_TABLE_SIZE(w) (1 << ((w)-2))
+
+/** The following two macro retrieves a particular odd multiple from a table
+ *  of precomputed multiples. */
+#define ECMULT_TABLE_GET_GE(r,pre,n,w) do { \
+    VERIFY_CHECK(((n) & 1) == 1); \
+    VERIFY_CHECK((n) >= -((1 << ((w)-1)) - 1)); \
+    VERIFY_CHECK((n) <=  ((1 << ((w)-1)) - 1)); \
+    if ((n) > 0) { \
+        *(r) = (pre)[((n)-1)/2]; \
+    } else { \
+        mbedtls_ge_neg((r), &(pre)[(-(n)-1)/2]); \
+    } \
+} while(0)
+
+#define ECMULT_TABLE_GET_GE_STORAGE(r,pre,n,w) do { \
+    VERIFY_CHECK(((n) & 1) == 1); \
+    VERIFY_CHECK((n) >= -((1 << ((w)-1)) - 1)); \
+    VERIFY_CHECK((n) <=  ((1 << ((w)-1)) - 1)); \
+    if ((n) > 0) { \
+        mbedtls_ge_from_storage((r), &(pre)[((n)-1)/2]); \
+    } else { \
+        mbedtls_ge_from_storage((r), &(pre)[(-(n)-1)/2]); \
+        mbedtls_ge_neg((r), (r)); \
+    } \
+} while(0)
+
+#define MBEDTLS_FE_CONST_INNER(d7, d6, d5, d4, d3, d2, d1, d0) { \
+    (d0) & 0x3FFFFFFUL, \
+    (((uint32_t)d0) >> 26) | (((uint32_t)(d1) & 0xFFFFFUL) << 6), \
+    (((uint32_t)d1) >> 20) | (((uint32_t)(d2) & 0x3FFFUL) << 12), \
+    (((uint32_t)d2) >> 14) | (((uint32_t)(d3) & 0xFFUL) << 18), \
+    (((uint32_t)d3) >> 8) | (((uint32_t)(d4) & 0x3UL) << 24), \
+    (((uint32_t)d4) >> 2) & 0x3FFFFFFUL, \
+    (((uint32_t)d4) >> 28) | (((uint32_t)(d5) & 0x3FFFFFUL) << 4), \
+    (((uint32_t)d5) >> 22) | (((uint32_t)(d6) & 0xFFFFUL) << 10), \
+    (((uint32_t)d6) >> 16) | (((uint32_t)(d7) & 0x3FFUL) << 16), \
+    (((uint32_t)d7) >> 10) \
+}
+
+#define MBEDTLS_FE_CONST(d7, d6, d5, d4, d3, d2, d1, d0) {MBEDTLS_FE_CONST_INNER((d7), (d6), (d5), (d4), (d3), (d2), (d1), (d0))}
+
+#define MBEDTLS_GE_CONST(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p) {MBEDTLS_FE_CONST((a),(b),(c),(d),(e),(f),(g),(h)), MBEDTLS_FE_CONST((i),(j),(k),(l),(m),(n),(o),(p)), 0}
+#define MBEDTLS_GE_CONST_INFINITY {MBEDTLS_FE_CONST(0, 0, 0, 0, 0, 0, 0, 0), MBEDTLS_FE_CONST(0, 0, 0, 0, 0, 0, 0, 0), 1}
+
+static const mbedtls_ge mbedtls_ge_const_g = MBEDTLS_GE_CONST(
+    0x79BE667EUL, 0xF9DCBBACUL, 0x55A06295UL, 0xCE870B07UL,
+    0x029BFCDBUL, 0x2DCE28D9UL, 0x59F2815BUL, 0x16F81798UL,
+    0x483ADA77UL, 0x26A3C465UL, 0x5DA4FBFCUL, 0x0E1108A8UL,
+    0xFD17B448UL, 0xA6855419UL, 0x9C47D08FUL, 0xFB10D4B8UL
+);
 #endif
 
 /*
