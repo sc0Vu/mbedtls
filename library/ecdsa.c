@@ -1626,7 +1626,8 @@ cleanup:
     return( ret );
 }
 
-// TODO: shift the uint_32 array?
+// TODO: shift the uint_32
+// if m->n > 0 or size > m->n, return -1
 int mbedtls_fe_to_mpi(mbedtls_fe *r, mbedtls_mpi *m)
 {
     int ret;
@@ -1672,6 +1673,20 @@ int mbedtls_set_xo_var(mbedtls_fe *x, mbedtls_fe *y, int odd) {
     return 0;
 }
 
+void mbedtls_fe_get_b32(unsigned char *r, const mbedtls_fe *a) {
+    int i;
+    for (i=0; i<32; i++) {
+        int j;
+        int c = 0;
+        for (j=0; j<4; j++) {
+            int limb = (8*i+2*j)/26;
+            int shift = (8*i+2*j)%26;
+            c |= ((a->n[limb] >> shift) & 0x3) << (2 * j);
+        }
+        r[31-i] = c;
+    }
+}
+
 // TODO: refactor and change n size
 int mbedtls_fe_set_b32(mbedtls_fe *r, mbedtls_mpi *b) {
     int i, ret;
@@ -1696,6 +1711,56 @@ int mbedtls_fe_set_b32(mbedtls_fe *r, mbedtls_mpi *b) {
 cleanup:
 
     return( ret );
+}
+
+void mbedtls_fe_normalize_var(mbedtls_fe *r) {
+    uint32_t t0 = r->n[0], t1 = r->n[1], t2 = r->n[2], t3 = r->n[3], t4 = r->n[4],
+             t5 = r->n[5], t6 = r->n[6], t7 = r->n[7], t8 = r->n[8], t9 = r->n[9];
+
+    /* Reduce t9 at the start so there will be at most a single carry from the first pass */
+    uint32_t m;
+    uint32_t x = t9 >> 22; t9 &= 0x03FFFFFUL;
+
+    /* The first pass ensures the magnitude is 1, ... */
+    t0 += x * 0x3D1UL; t1 += (x << 6);
+    t1 += (t0 >> 26); t0 &= 0x3FFFFFFUL;
+    t2 += (t1 >> 26); t1 &= 0x3FFFFFFUL;
+    t3 += (t2 >> 26); t2 &= 0x3FFFFFFUL; m = t2;
+    t4 += (t3 >> 26); t3 &= 0x3FFFFFFUL; m &= t3;
+    t5 += (t4 >> 26); t4 &= 0x3FFFFFFUL; m &= t4;
+    t6 += (t5 >> 26); t5 &= 0x3FFFFFFUL; m &= t5;
+    t7 += (t6 >> 26); t6 &= 0x3FFFFFFUL; m &= t6;
+    t8 += (t7 >> 26); t7 &= 0x3FFFFFFUL; m &= t7;
+    t9 += (t8 >> 26); t8 &= 0x3FFFFFFUL; m &= t8;
+
+    /* ... except for a possible carry at bit 22 of t9 (i.e. bit 256 of the field element) */
+    VERIFY_CHECK(t9 >> 23 == 0);
+
+    /* At most a single final reduction is needed; check if the value is >= the field characteristic */
+    x = (t9 >> 22) | ((t9 == 0x03FFFFFUL) & (m == 0x3FFFFFFUL)
+        & ((t1 + 0x40UL + ((t0 + 0x3D1UL) >> 26)) > 0x3FFFFFFUL));
+
+    if (x) {
+        t0 += 0x3D1UL; t1 += (x << 6);
+        t1 += (t0 >> 26); t0 &= 0x3FFFFFFUL;
+        t2 += (t1 >> 26); t1 &= 0x3FFFFFFUL;
+        t3 += (t2 >> 26); t2 &= 0x3FFFFFFUL;
+        t4 += (t3 >> 26); t3 &= 0x3FFFFFFUL;
+        t5 += (t4 >> 26); t4 &= 0x3FFFFFFUL;
+        t6 += (t5 >> 26); t5 &= 0x3FFFFFFUL;
+        t7 += (t6 >> 26); t6 &= 0x3FFFFFFUL;
+        t8 += (t7 >> 26); t7 &= 0x3FFFFFFUL;
+        t9 += (t8 >> 26); t8 &= 0x3FFFFFFUL;
+
+        /* If t9 didn't carry to bit 22 already, then it should have after any final reduction */
+        VERIFY_CHECK(t9 >> 22 == x);
+
+        /* Mask off the possible multiple of 2^256 from the final reduction */
+        t9 &= 0x03FFFFFUL;
+    }
+
+    r->n[0] = t0; r->n[1] = t1; r->n[2] = t2; r->n[3] = t3; r->n[4] = t4;
+    r->n[5] = t5; r->n[6] = t6; r->n[7] = t7; r->n[8] = t8; r->n[9] = t9;
 }
 
 void mbedtls_fe_normalize_weak(mbedtls_fe *r) {
@@ -1851,7 +1916,6 @@ void mbedtls_gej_double_var(mbedtls_gej *r, const mbedtls_gej *a, mbedtls_fe *rz
     }
 
     mbedtls_fe_mul(&r->z, &a->z, &a->y);
-    // print_gej(r);
     mbedtls_fe_mul_int(&r->z, 2);       /* Z' = 2*Y*Z (2) */
     mbedtls_fe_sqr(&t1, &a->x);
     mbedtls_fe_mul_int(&t1, 3);         /* T1 = 3*X^2 (3) */
@@ -1862,18 +1926,15 @@ void mbedtls_gej_double_var(mbedtls_gej *r, const mbedtls_gej *a, mbedtls_fe *rz
     mbedtls_fe_mul_int(&t4, 2);         /* T4 = 8*Y^4 (2) */
     mbedtls_fe_mul(&t3, &t3, &a->x);    /* T3 = 2*X*Y^2 (1) */
     r->x = t3;
-    // print_gej(r);
     mbedtls_fe_mul_int(&r->x, 4);       /* X' = 8*X*Y^2 (4) */
     mbedtls_fe_negate(&r->x, &r->x, 4); /* X' = -8*X*Y^2 (5) */
     mbedtls_fe_add(&r->x, &t2);         /* X' = 9*X^4 - 8*X*Y^2 (6) */
-    // print_gej(r);
     mbedtls_fe_negate(&t2, &t2, 1);     /* T2 = -9*X^4 (2) */
     mbedtls_fe_mul_int(&t3, 6);         /* T3 = 12*X*Y^2 (6) */
     mbedtls_fe_add(&t3, &t2);           /* T3 = 12*X*Y^2 - 9*X^4 (8) */
     mbedtls_fe_mul(&r->y, &t1, &t3);    /* Y' = 36*X^3*Y^2 - 27*X^6 (1) */
     mbedtls_fe_negate(&t2, &t4, 2);     /* T2 = -8*Y^4 (3) */
     mbedtls_fe_add(&r->y, &t2);         /* Y' = 36*X^3*Y^2 - 27*X^6 - 8*Y^4 (4) */
-    // print_gej(r);
 }
 
 void mbedtls_ge_set_gej_zinv(mbedtls_ge *r, mbedtls_gej *a, const mbedtls_fe *zi) {
@@ -2012,10 +2073,7 @@ void mbedtls_ecmult_odd_multiples_table(int n, mbedtls_gej *prej, mbedtls_fe *zr
     d_ge.y = d.y;
     d_ge.infinity = 0;
 
-    // print_gej(&d);
-
     mbedtls_ge_set_gej_zinv(&a_ge, a, &d.z);
-    // print_ge(&a_ge);
     prej[0].x = a_ge.x;
     prej[0].y = a_ge.y;
     prej[0].z = a->z;
@@ -2471,18 +2529,21 @@ void mbedtls_ge_set_gej_var(mbedtls_ge *r, mbedtls_gej *a) {
  * MOVE p mod n to grp
  * Recovery process:
  * Use mbedtls ecp defined type
+ * if set blen as size_t, the value will be wrong
  */
 int ecdsa_sig_recover( mbedtls_ecp_group *grp,
                 mbedtls_mpi *r, mbedtls_mpi *s, int recid,
-                mbedtls_ecp_point *Q, const unsigned char *buf, size_t blen )
+                const unsigned char *pubkey_buf, const unsigned char *buf, int blen,
+                mbedtls_ge_storage *pre_g )
 {
     ECDSA_VALIDATE_RET( grp   != NULL );
     ECDSA_VALIDATE_RET( r     != NULL );
     ECDSA_VALIDATE_RET( s     != NULL );
-    ECDSA_VALIDATE_RET( Q     != NULL );
+    ECDSA_VALIDATE_RET( pubkey     != NULL );
     ECDSA_VALIDATE_RET( buf   != NULL || blen == 0 );
     ECDSA_VALIDATE_RET( mbedtls_mpi_cmp_int( r, 0 ) == 0 || mbedtls_mpi_cmp_int( s, 0 ) == 0 );
     ECDSA_VALIDATE_RET( recid >=0 && recid < 4 );
+    ECDSA_VALIDATE_RET( pre_g != NULL );
 
     int ret;
     // mbedtls_ecp_point fx;
@@ -2491,11 +2552,12 @@ int ecdsa_sig_recover( mbedtls_ecp_group *grp,
     mbedtls_gej qj;
     mbedtls_gej gj;
     mbedtls_ge pubkey;
+    mbedtls_ge_storage ss;
     mbedtls_fe fe;
     mbedtls_fe fy;
     mbedtls_fe fe_order;
     mbedtls_mpi pmo, m, rn, u1, u2, rnm, mn, u1n, sn;
-    mbedtls_ge_storage (*pre_g)[];
+    // mbedtls_ge_storage (*pre_gg)[];
     // int window_size = grp->nbits >= 384 ? 5 : 4;
     // default is 5
     int window_size_a = 5;
@@ -2534,19 +2596,23 @@ int ecdsa_sig_recover( mbedtls_ecp_group *grp,
     MBEDTLS_MPI_CHK( mbedtls_mpi_mod_mpi( &u2, &sn, &grp->N ) );
 
     // initialize pre_g
-    mbedtls_gej_set_ge(&gj, &mbedtls_ge_const_g);
-    pre_g = (mbedtls_ge_storage (*)[]) malloc(sizeof((*pre_g)[0]) * ECMULT_TABLE_SIZE(window_size_g));
-    ECDSA_VALIDATE_RET( pre_g != NULL );
+    // mbedtls_gej_set_ge(&gj, &mbedtls_ge_const_g);
+    // pre_gg = (mbedtls_ge_storage (*)[]) malloc(sizeof((*pre_gg)[0]) * ECMULT_TABLE_SIZE(window_size_g));
 
     /* precompute the tables with odd multiples */
-    mbedtls_ecmult_odd_multiples_table_storage_var(ECMULT_TABLE_SIZE(window_size_g), pre_g, &gj);
+    // mbedtls_ecmult_odd_multiples_table_storage_var(ECMULT_TABLE_SIZE(window_size_g), pre_g, &gj);
 
     mbedtls_ecmult(grp, pre_g, &qj, &xj, &u2, &u1, window_size_a, window_size_g);
     mbedtls_ge_set_gej_var(&pubkey, &qj);
-    mbedtls_fe_to_mpi(&pubkey.x, &Q->X);
-    mbedtls_fe_to_mpi(&pubkey.y, &Q->Y);
+    mbedtls_fe_normalize_var(&pubkey.x);
+    mbedtls_fe_normalize_var(&pubkey.y);
+    memset(pubkey_buf, 0x04, 1);
+    mbedtls_fe_get_b32(pubkey_buf+1, &pubkey.x);
+    mbedtls_fe_get_b32(pubkey_buf+33, &pubkey.y);
+    // mbedtls_fe_to_mpi(&pubkey.x, &Q->X);
+    // mbedtls_fe_to_mpi(&pubkey.y, &Q->Y);
     ret = qj.infinity;
-    free(pre_g);
+    // free(pre_g);
 
 cleanup:
 
