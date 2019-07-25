@@ -2534,7 +2534,7 @@ void mbedtls_ge_set_gej_var(mbedtls_ge *r, mbedtls_gej *a) {
 int ecdsa_sig_recover( mbedtls_ecp_group *grp,
                 mbedtls_mpi *r, mbedtls_mpi *s, int recid,
                 const unsigned char *pubkey_buf, const unsigned char *buf, int blen,
-                mbedtls_ge_storage *pre_g )
+                mbedtls_ge_storage *pre_g, int window_size_a, int window_size_g )
 {
     ECDSA_VALIDATE_RET( grp   != NULL );
     ECDSA_VALIDATE_RET( r     != NULL );
@@ -2557,11 +2557,6 @@ int ecdsa_sig_recover( mbedtls_ecp_group *grp,
     mbedtls_fe fy;
     mbedtls_fe fe_order;
     mbedtls_mpi pmo, m, rn, u1, u2, rnm, mn, u1n, sn;
-    // mbedtls_ge_storage (*pre_gg)[];
-    // int window_size = grp->nbits >= 384 ? 5 : 4;
-    // default is 5
-    int window_size_a = 5;
-    int window_size_g = 16;
     // mbedtls_ecp_point_init(&fx);mbedtls_ecp_point_init(&qj);
     mbedtls_mpi_init(&pmo);mbedtls_mpi_init(&m);mbedtls_mpi_init(&rn);mbedtls_mpi_init(&u1);mbedtls_mpi_init(&u2);
     mbedtls_mpi_init(&rnm);mbedtls_mpi_init(&mn);mbedtls_mpi_init(&sn);
@@ -2595,13 +2590,6 @@ int ecdsa_sig_recover( mbedtls_ecp_group *grp,
     MBEDTLS_MPI_CHK( mbedtls_mpi_mul_mpi( &sn, s, &rn ) );
     MBEDTLS_MPI_CHK( mbedtls_mpi_mod_mpi( &u2, &sn, &grp->N ) );
 
-    // initialize pre_g
-    // mbedtls_gej_set_ge(&gj, &mbedtls_ge_const_g);
-    // pre_gg = (mbedtls_ge_storage (*)[]) malloc(sizeof((*pre_gg)[0]) * ECMULT_TABLE_SIZE(window_size_g));
-
-    /* precompute the tables with odd multiples */
-    // mbedtls_ecmult_odd_multiples_table_storage_var(ECMULT_TABLE_SIZE(window_size_g), pre_g, &gj);
-
     mbedtls_ecmult(grp, pre_g, &qj, &xj, &u2, &u1, window_size_a, window_size_g);
     mbedtls_ge_set_gej_var(&pubkey, &qj);
     mbedtls_fe_normalize_var(&pubkey.x);
@@ -2612,7 +2600,6 @@ int ecdsa_sig_recover( mbedtls_ecp_group *grp,
     // mbedtls_fe_to_mpi(&pubkey.x, &Q->X);
     // mbedtls_fe_to_mpi(&pubkey.y, &Q->Y);
     ret = qj.infinity;
-    // free(pre_g);
 
 cleanup:
 
